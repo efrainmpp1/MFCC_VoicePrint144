@@ -140,4 +140,6 @@ Output example:
 
 ## 📜 License
 
-MIT License (or your chosen license).
+This project is licensed under the **MIT License**.  
+You are free to use, modify, and distribute this software, provided that the original license and copyright notice are included in all copies or substantial portions of the software.  
+See the [LICENSE](LICENSE) file for details.
