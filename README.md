@@ -47,13 +47,13 @@ MFCC\_VoicePrint144/
 ├─ README.md
 ├─ requirements.txt
 ├─ examples/
-│  └─ sample.wav
-└─ voiceprint\_features\_144/
-├─ **init**.py
-├─ cli.py
-├─ common\_adaptive.py
-├─ mfcc144.py
-└─ mel144.py
+│   └─ sample.wav
+└─ voiceprint_features_144/
+    ├─ __init__.py
+    ├─ cli.py
+    ├─ common_adaptive.py
+    ├─ mfcc144.py
+    └─ mel144.py
 
 ```
 
