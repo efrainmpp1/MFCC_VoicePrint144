@@ -18,6 +18,27 @@ It ensures consistent embeddings across devices and sampling rates.
 
 ---
 
+## 🛠️ Pipeline
+
+```mermaid
+flowchart TD
+A[Audio file wav] --> B[Frame segmentation 25ms window / 10ms hop]
+B --> C{Feature extraction}
+C --> D[MFCC 24 coef.]
+C --> E[Log-Mel 48 bands]
+D --> F[Δ delta]
+F --> G[ΔΔ delta-delta]
+D & F & G --> H[Stats over time\nmean, std]
+E --> I[Stats over time\n mean, std, median]
+H --> J[Fixed 144D vector\n24 × 3 × 2 = 144]
+I --> K[Fixed 144D vector\n48 × 3 = 144]
+```
+
+> Every audio file (regardless of duration) is split into short frames (~25 ms).  
+> From each frame we extract either **MFCCs (24 coef., Δ, ΔΔ)** or **Log-Mel energies (48 bands)**.  
+> Instead of keeping all frames, we apply **statistical pooling** over time (mean, std, median).  
+> This produces a **fixed-length 144D vector** that represents the global “voiceprint” of the speaker.
+
 ## 📂 Repository structure
 
 ```
