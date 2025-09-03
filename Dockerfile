@@ -23,5 +23,5 @@ COPY . .
 # Expondo a porta do container
 EXPOSE 8000
 
-# Comando de inicialização (Gunicorn com 2 workers e 4 threads)
-CMD ["gunicorn", "-w", "2", "-k", "gthread", "--threads", "4", "-b", "0.0.0.0:8000", "api.wsgi:app"]
+# Gunicorn lendo FLASK_PORT (padrão 8000 se não setado)
+CMD ["sh", "-c", "gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:${FLASK_PORT:-8000} api.wsgi:app"]
