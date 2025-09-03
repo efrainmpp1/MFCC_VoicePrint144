@@ -1,8 +1,13 @@
+Perfeito 🙌.
+Aqui está um **README.md atualizado** para o seu repositório **MFCC_VoicePrint144**, já refletindo CLI, Python API, REST API em Flask, estrutura atual do projeto e testes automatizados:
+
+---
+
 # MFCC_VoicePrint144
 
-Extract a fixed **144-dimensional audio feature vector** from any `.wav` file for **speaker biometrics and voice analysis**.  
-This project standardizes feature extraction using **MFCC + Δ + ΔΔ** or **Log-Mel (+PCEN)** within the human voice band (100–7200 Hz).  
-It ensures consistent embeddings across devices and sampling rates.
+Extract a fixed **144-dimensional audio feature vector** from any `.wav` file for **speaker biometrics and voice analysis**.
+This project standardizes feature extraction using **MFCC + Δ + ΔΔ** or **Log-Mel (+PCEN)** within the human voice band (100–7200 Hz).
+It provides three interfaces: **CLI**, **Python API**, and a **REST API (Flask)**.
 
 ---
 
@@ -10,51 +15,59 @@ It ensures consistent embeddings across devices and sampling rates.
 
 - **MFCC 144D** → 24 MFCC × (static, Δ, ΔΔ) × (mean, std) = 144
 - **Log-Mel 144D** → 48 Mel bands × (mean, std, median) = 144
-- **Adaptive STFT** parameters (25 ms window / 10 ms hop, scaled to file sample rate)
+- **Adaptive STFT** (25 ms window / 10 ms hop, scaled to sample rate)
 - **Safe frequency band:** 100–7200 Hz (clamped at 0.45 × sample rate)
-- **Optional PCEN** for robustness to gain/recording conditions
-- Works with audios recorded on different devices and sample rates
-- Always returns a fixed-length vector `[144]`
+- **Optional PCEN** for Log-Mel, robust to gain/recording differences
+- **Consistent embeddings** across devices and sample rates
+- **API-ready**: extract features via REST endpoint with form-data upload
+- **Automated tests** with `pytest` for reliability
 
----
+## 🎛️ Feature Extraction Parameters
 
-## 🛠️ Pipeline
-
-```mermaid
-flowchart TD
-A[Audio file wav] --> B[Frame segmentation 25ms window / 10ms hop]
-B --> C{Feature extraction}
-C --> D[MFCC 24 coef.]
-C --> E[Log-Mel 48 bands]
-D --> F[Δ delta]
-F --> G[ΔΔ delta-delta]
-D & F & G --> H[Stats over time\nmean, std]
-E --> I[Stats over time\n mean, std, median]
-H --> J[Fixed 144D vector\n24 × 3 × 2 = 144]
-I --> K[Fixed 144D vector\n48 × 3 = 144]
-```
-
-> Every audio file (regardless of duration) is split into short frames (~25 ms).  
-> From each frame we extract either **MFCCs (24 coef., Δ, ΔΔ)** or **Log-Mel energies (48 bands)**.  
-> Instead of keeping all frames, we apply **statistical pooling** over time (mean, std, median).  
-> This produces a **fixed-length 144D vector** that represents the global “voiceprint” of the speaker.
+| **Stage**           | **Parameter**          | **Value / Notes**                                            |
+| ------------------- | ---------------------- | ------------------------------------------------------------ |
+| **Pre-emphasis**    | Filter                 | `y[t] = x[t] – 0.97 × x[t-1]` (boosts high frequencies)      |
+| **Framing**         | Window length          | 25 ms (\~400 samples @ 16 kHz)                               |
+|                     | Hop length             | 10 ms (\~160 samples @ 16 kHz)                               |
+| **FFT / STFT**      | FFT size (`n_fft`)     | 512 (adaptive to sample rate)                                |
+| **Frequency range** | `fmin`                 | 100 Hz (cut-off below human voice)                           |
+|                     | `fmax`                 | 7200 Hz (upper band for human voice, clamped at `0.45 × sr`) |
+| **MFCC branch**     | # of MFCC coefficients | 24 (excluding 0th)                                           |
+|                     | Δ (delta)              | 1st temporal derivative (captures dynamics)                  |
+|                     | ΔΔ (delta-delta)       | 2nd temporal derivative (captures acceleration)              |
+|                     | Statistics             | Mean + Std (per coef.)                                       |
+|                     | Vector composition     | 24 × (static + Δ + ΔΔ) × 2 stats = **144D**                  |
+| **Log-Mel branch**  | # of Mel bands         | 48                                                           |
+|                     | PCEN (optional)        | Per-Channel Energy Normalization for robustness              |
+|                     | Statistics             | Mean + Std + Median                                          |
+|                     | Vector composition     | 48 × 3 stats = **144D**                                      |
+| **Pooling**         | Method                 | Statistical pooling over all frames → fixed-length vector    |
+| **Output**          | Shape                  | `[144]` (consistent across duration and device sample rate)  |
 
 ## 📂 Repository structure
 
 ```
-
-MFCC\_VoicePrint144/
+MFCC_VoicePrint144/
 ├─ README.md
 ├─ requirements.txt
 ├─ examples/
 │   └─ sample.wav
-└─ voiceprint_features_144/
-    ├─ __init__.py
-    ├─ cli.py
-    ├─ common_adaptive.py
-    ├─ mfcc144.py
-    └─ mel144.py
-
+├─ voiceprint_features_144/
+│   ├─ __init__.py
+│   ├─ cli.py
+│   ├─ common_adaptive.py
+│   ├─ mfcc144.py
+│   └─ mel144.py
+├─ api/
+│   ├─ __init__.py
+│   ├─ app.py
+│   ├─ config.py
+│   ├─ wsgi.py
+│   └─ uploads/
+├─ tests/
+│   ├─ test_api_extract.py
+│   └─ test_feature_extractors.py
+└─ .github/ (optional CI/CD workflows in future)
 ```
 
 ---
@@ -77,7 +90,9 @@ Dependencies:
 - `numpy`
 - `librosa`
 - `soundfile`
-- `resampy` (for resampling)
+- `resampy`
+- `flask`
+- `pytest` (for tests)
 
 ---
 
@@ -98,7 +113,7 @@ python -m voiceprint_features_144.cli examples/sample.wav --mode logmel --pcen
 - `--mode {mfcc|logmel}` → choose extractor (default: `mfcc`)
 - `--pcen` → enable PCEN (only for `logmel`)
 - `--no-down16k` → do not downsample to 16 kHz when sr > 16k
-- `--out file.json` → save JSON output to file
+- `--out file.json` → save JSON output
 
 ---
 
@@ -130,16 +145,83 @@ Output example:
 
 ---
 
+## 🌐 Usage (REST API)
+
+Start the Flask server:
+
+```bash
+export FLASK_APP=api/wsgi.py
+flask run --host=0.0.0.0 --port=8000
+```
+
+### Endpoints
+
+- **Health check**
+
+  ```
+  GET /health
+  → {"status": "ok"}
+  ```
+
+- **Feature extraction**
+
+  ```
+  POST /api/v1/extract?mode=mfcc|logmel&pcen=0|1&down16k=0|1
+  form-data: audio=@file.wav
+  ```
+
+Example request (with curl):
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/extract?mode=logmel&pcen=1" \
+  -F "audio=@examples/sample.wav"
+```
+
+Example response:
+
+```json
+{
+  "sr": 16000,
+  "band": [100, 7200],
+  "mode": "logmel",
+  "pcen": true,
+  "down16k": true,
+  "shape": [144],
+  "features": [ ... 144 floats ... ],
+  "latency_ms": 42
+}
+```
+
+---
+
 ## 🔬 Notes
 
-- If audio has `sr < 16k`, no upsampling is performed; `fmax` is clamped to `0.45*sr`.
-- For audios `sr ≥ 16k`, the signal is downsampled to 16k by default for consistency.
-- Apply **z-score normalization** with mean/std from your training dataset before using in a neural network.
+- If `sr < 16k`, no upsampling; `fmax` is clamped to `0.45*sr`.
+- For `sr ≥ 16k`, audio is downsampled to 16k by default (configurable).
+- Apply **z-score normalization** with training dataset statistics before NN usage.
+- New mode (coming soon): **biometric-only extractor** (structural MFCCs without Δ/ΔΔ).
+
+---
+
+## 🧪 Running tests
+
+Run all tests with:
+
+```bash
+pytest -q tests
+```
+
+Output (example):
+
+```
+..........                                                                                                           [100%]
+10 passed in 1.76s
+```
 
 ---
 
 ## 📜 License
 
-This project is licensed under the **MIT License**.  
-You are free to use, modify, and distribute this software, provided that the original license and copyright notice are included in all copies or substantial portions of the software.  
+This project is licensed under the **MIT License**.
+You are free to use, modify, and distribute this software, provided that the original license and copyright notice are included in all copies or substantial portions of the software.
 See the [LICENSE](LICENSE) file for details.

@@ -6,19 +6,32 @@ from flask import Flask, request, jsonify
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 from .config import Config
+
+# Extratores existentes
 from voiceprint_features_144 import extract_mfcc_144, extract_logmel_144
+# Novos modos estruturais (sem variância temporal)
+from voiceprint_features_144.biometric144 import extract_biometric_144
 
 
 # ---------- Helpers puros (reduzem complexidade da rota) ----------
 
+ALLOWED_MODES = {"mfcc", "logmel", "bio_mean144", "bio_mm72"}
+
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in Config.ALLOWED_EXTENSIONS
 
+def normalize_mode(raw: str) -> str:
+    m = (raw or Config.DEFAULT_MODE).strip().lower()
+    return m if m in ALLOWED_MODES else "mfcc"
+
 def get_request_params() -> Tuple[str, bool, bool]:
-    """Lê query params com defaults do Config e normaliza."""
-    mode = (request.args.get("mode") or Config.DEFAULT_MODE).strip().lower()
-    if mode not in ("mfcc", "logmel"):
-        mode = "mfcc"
+    """
+    Lê query params com defaults do Config e normaliza.
+    mode: mfcc | logmel | bio_mean144 | bio_mm72
+    pcen: 0|1 (só é usado em logmel e modos bio_*)
+    down16k: 0|1
+    """
+    mode = normalize_mode(request.args.get("mode"))
     pcen = (request.args.get("pcen") or Config.DEFAULT_PCEN) == "1"
     down16k = (request.args.get("down16k") or Config.DEFAULT_DOWN16K) == "1"
     return mode, pcen, down16k
@@ -39,11 +52,25 @@ def save_uploaded_wav(file: FileStorage, upload_dir: str) -> str:
     return path
 
 def run_extractor(path: str, mode: str, pcen: bool, down16k: bool) -> Tuple[list, int, Tuple[int, int], str, bool]:
-    """Executa o extrator escolhido e retorna (features, sr, band, mode_final, pcen_final)."""
+    """
+    Executa o extrator escolhido e retorna:
+      (features, sr, band, mode_final, pcen_final)
+    """
     if mode == "logmel":
         vec, sr, band = extract_logmel_144(path, use_pcen=pcen, force_down_to_16k=down16k)
         return vec.tolist(), int(sr), (int(band[0]), int(band[1])), "logmel", bool(pcen)
-    # default: mfcc
+
+    if mode == "bio_mean144":
+        # Log-Mel 144 bandas + média (144D “estrutural” puro)
+        vec, sr, band = extract_biometric_144(path, mode="mean144", use_pcen=pcen, force_down_to_16k=down16k)
+        return vec.tolist(), int(sr), (int(band[0]), int(band[1])), "bio_mean144", bool(pcen)
+
+    if mode == "bio_mm72":
+        # Log-Mel 72 bandas + [média, mediana] (144D, ainda sem variância)
+        vec, sr, band = extract_biometric_144(path, mode="mean_median_72", use_pcen=pcen, force_down_to_16k=down16k)
+        return vec.tolist(), int(sr), (int(band[0]), int(band[1])), "bio_mm72", bool(pcen)
+
+    # default: mfcc (com Δ/ΔΔ + stats → 144D)
     vec, sr, band = extract_mfcc_144(path, force_down_to_16k=down16k)
     return vec.tolist(), int(sr), (int(band[0]), int(band[1])), "mfcc", False
 
@@ -76,7 +103,7 @@ def create_app() -> Flask:
     @app.post("/api/v1/extract")
     def extract():
         """
-        POST /api/v1/extract?mode=mfcc|logmel&pcen=0|1&down16k=0|1
+        POST /api/v1/extract?mode=mfcc|logmel|bio_mean144|bio_mm72&pcen=0|1&down16k=0|1
         form-data: audio=@file.wav
         """
         t0 = time.time()
