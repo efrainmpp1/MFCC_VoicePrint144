@@ -1,0 +1,28 @@
+# venvs
+.venv/
+venv/
+env/
+
+# caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+*.cache/
+
+# git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# dados temporários/uploads locais
+api/uploads/
+
+# testes locais (opcional incluir se não precisar na imagem)
+tests/
+pytest.ini
