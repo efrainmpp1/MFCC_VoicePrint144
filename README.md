@@ -1,8 +1,3 @@
-Perfeito 🙌.
-Aqui está um **README.md atualizado** para o seu repositório **MFCC_VoicePrint144**, já refletindo CLI, Python API, REST API em Flask, estrutura atual do projeto e testes automatizados:
-
----
-
 # MFCC_VoicePrint144
 
 Extract a fixed **144-dimensional audio feature vector** from any `.wav` file for **speaker biometrics and voice analysis**.

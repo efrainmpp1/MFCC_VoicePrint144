@@ -6,6 +6,7 @@ charset-normalizer==3.4.3
 click==8.2.1
 decorator==5.2.1
 Flask==3.1.2
+gunicorn==23.0.0
 idna==3.10
 iniconfig==2.1.0
 itsdangerous==2.2.0
