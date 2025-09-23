@@ -104,17 +104,17 @@ def create_app() -> Flask:
     def extract():
         """
         POST /api/v1/extract?mode=mfcc|logmel|bio_mean144|bio_mm72&pcen=0|1&down16k=0|1
-        form-data: audio=@file.wav
+        form-data: file=@file.wav
         """
         t0 = time.time()
 
         # 1) parâmetros
         mode, pcen, down16k = get_request_params()
 
-        # 2) arquivo (key obrigatória: 'audio')
-        file = request.files.get("audio")
+        # 2) arquivo (key obrigatória: 'file')
+        file = request.files.get("file")
         if file is None:
-            return jsonify({"error": "missing file field 'audio'"}), 400
+            return jsonify({"error": "missing file field 'file'"}), 400
 
         # 3) salvar temporário
         try:
