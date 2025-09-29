@@ -45,7 +45,7 @@ def test_extract_144_ok(client, tmp_path, mode, expect_pcen_field):
 
     with open(wav_path, "rb") as f:
         data = {
-            "audio": (f, "sample.wav"),
+            "file": (f, "sample.wav"),
         }
         # pcen=1 só tem efeito em logmel/bio_*, mas não deve quebrar nos demais
         resp = client.post(
@@ -77,7 +77,7 @@ def test_missing_file_field(client):
     resp = client.post("/api/v1/extract?mode=mfcc", data={}, content_type="multipart/form-data")
     assert resp.status_code == 400
     payload = resp.get_json()
-    assert "missing file field 'audio'" in payload.get("error", "")
+    assert "missing file field 'file'" in payload.get("error", "")
 
 
 def test_wrong_extension(client, tmp_path):
@@ -86,7 +86,7 @@ def test_wrong_extension(client, tmp_path):
     bad_file.write_text("not a wav")
 
     with open(bad_file, "rb") as f:
-        data = {"audio": (f, "bad.txt")}
+        data = {"file": (f, "bad.txt")}
         resp = client.post("/api/v1/extract?mode=mfcc", data=data, content_type="multipart/form-data")
 
     assert resp.status_code in (400, 415)
@@ -100,7 +100,7 @@ def test_down16k_behavior(client, tmp_path, sr):
     wav_path = _make_test_wav(tmp_path, sr=sr, secs=0.5, freq=330.0)
 
     with open(wav_path, "rb") as f:
-        data = {"audio": (f, "varsr.wav")}
+        data = {"file": (f, "varsr.wav")}
         resp = client.post(
             "/api/v1/extract?mode=logmel&pcen=0&down16k=1",
             data=data,
@@ -116,7 +116,7 @@ def test_no_downsample_when_requested(client, tmp_path):
     wav_path = _make_test_wav(tmp_path, sr=32000, secs=0.5, freq=330.0)
 
     with open(wav_path, "rb") as f:
-        data = {"audio": (f, "nodown.wav")}
+        data = {"file": (f, "nodown.wav")}
         resp = client.post(
             "/api/v1/extract?mode=bio_mean144&pcen=1&down16k=0",
             data=data,
@@ -127,3 +127,40 @@ def test_no_downsample_when_requested(client, tmp_path):
     assert payload["sr"] in (32000, 31999, 32001)  # manteve SR
     # fmax deve ser limitado por 0.45 * sr (logo < 14400)
     assert payload["band"][1] <= int(0.45 * payload["sr"]) + 5
+
+def test_extract_mfcc_matrix_ok(client, tmp_path):
+    wav_path = _make_test_wav(tmp_path, sr=16000, secs=0.7, freq=440.0)
+
+    with open(wav_path, "rb") as f:
+        data = {
+            "file": (f, "sample.wav"),
+        }
+
+        # Parâmetros adicionais
+        mode = "mfcc_matrix"
+        n_frames = 200
+        fmin = 100
+        fmax = 800
+
+        resp = client.post(
+            f"/api/v1/extract?mode={mode}&n_frames={n_frames}&fmin={fmin}&fmax={fmax}",
+            data=data,
+            content_type="multipart/form-data",
+        )
+
+    assert resp.status_code == 200, resp.data
+    payload = resp.get_json()
+
+    # Checa shape [n_frames, 144]
+    assert payload["shape"] == [n_frames, 144]
+    assert isinstance(payload["features"], list)
+    assert len(payload["features"]) == n_frames
+    assert all(isinstance(row, list) and len(row) == 144 for row in payload["features"])
+
+    # Checa tipo dos metadados
+    assert payload["mode"] == mode
+    assert isinstance(payload["sr"], int)
+    assert isinstance(payload["band"], list) and len(payload["band"]) == 2
+    assert payload["band"][0] == fmin
+    assert payload["band"][1] == fmax
+
