@@ -14,11 +14,11 @@ def extract_mfcc_matrix(
     fmax: int = 7000
 ) -> np.ndarray:
     """
-    Retorna uma matriz (target_frames, 144), sendo:
+    Retorna uma matriz (target_frames, 144), com valores normalizados por frame entre 0–255 (uint8).
     - 24 MFCCs
     - 24 Δ
     - 24 ΔΔ
-    Concatenados por linha/frame
+    Concatenados e duplicados por linha/frame (total 144 features/frame)
     """
     y, sr = sf.read(wav_path, always_2d=False)
     y = to_mono(y).astype(np.float32)
@@ -43,7 +43,6 @@ def extract_mfcc_matrix(
     full = np.concatenate([M, d1, d2], axis=0).astype(np.float32)  # (72, T)
     full = full.T  # (T, 72)
 
-    # Repete para dar 144 por frame
     full = np.concatenate([full, full], axis=1)  # (T, 144)
 
     if full.shape[0] < target_frames:
@@ -52,4 +51,16 @@ def extract_mfcc_matrix(
     elif full.shape[0] > target_frames:
         full = full[:target_frames, :]
 
-    return full, sr, (fmin, fmax)
+    # Normaliza cada linha/frame para [0, 255] e converte para uint8
+    normalized = np.zeros_like(full, dtype=np.uint8)
+    for i in range(full.shape[0]):
+        row = full[i]
+        min_val = row.min()
+        max_val = row.max()
+        if max_val - min_val == 0:
+            normalized[i] = np.zeros_like(row, dtype=np.uint8)
+        else:
+            norm = (row - min_val) / (max_val - min_val)
+            normalized[i] = np.round(norm * 255).astype(np.uint8)
+
+    return normalized, sr, (fmin, fmax)
