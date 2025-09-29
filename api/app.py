@@ -11,11 +11,13 @@ from .config import Config
 from voiceprint_features_144 import extract_mfcc_144, extract_logmel_144
 # Novos modos estruturais (sem variância temporal)
 from voiceprint_features_144.biometric144 import extract_biometric_144
+# Novo modo MFCC em matriz (sem resumo estatístico)
+from voiceprint_features_144.extract_mfcc_matrix import extract_mfcc_matrix
 
 
 # ---------- Helpers puros (reduzem complexidade da rota) ----------
 
-ALLOWED_MODES = {"mfcc", "logmel", "bio_mean144", "bio_mm72"}
+ALLOWED_MODES = {"mfcc", "logmel", "bio_mean144", "bio_mm72", "mfcc_matrix"}
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in Config.ALLOWED_EXTENSIONS
@@ -69,6 +71,17 @@ def run_extractor(path: str, mode: str, pcen: bool, down16k: bool) -> Tuple[list
         # Log-Mel 72 bandas + [média, mediana] (144D, ainda sem variância)
         vec, sr, band = extract_biometric_144(path, mode="mean_median_72", use_pcen=pcen, force_down_to_16k=down16k)
         return vec.tolist(), int(sr), (int(band[0]), int(band[1])), "bio_mm72", bool(pcen)
+    if mode == "mfcc_matrix":
+        # Parâmetros opcionais via query string
+        try:
+            n_frames = int(request.args.get("n_frames", 20000))
+            fmin = int(request.args.get("fmin", 100))
+            fmax = int(request.args.get("fmax", 7000))
+        except Exception:
+            raise ValueError("n_frames, fmin ou fmax inválidos")
+
+        mat, sr, band = extract_mfcc_matrix(path, target_frames=n_frames, fmin=fmin, fmax=fmax)
+        return mat.tolist(), int(sr), (int(band[0]), int(band[1])), "mfcc_matrix", False
 
     # default: mfcc (com Δ/ΔΔ + stats → 144D)
     vec, sr, band = extract_mfcc_144(path, force_down_to_16k=down16k)
@@ -76,14 +89,15 @@ def run_extractor(path: str, mode: str, pcen: bool, down16k: bool) -> Tuple[list
 
 def build_payload(features: list, sr: int, band: Tuple[int, int], mode: str, pcen: bool,
                   down16k: bool, latency_ms: int) -> Dict[str, Any]:
+    shape = [len(features), len(features[0])] if isinstance(features[0], list) else [144]
     return {
         "sr": sr,
         "band": [band[0], band[1]],
         "mode": mode,
         "pcen": pcen,
         "down16k": bool(down16k),
-        "shape": [144],
-        "features": [float(x) for x in features],
+        "shape": shape,
+        "features": features,
         "latency_ms": latency_ms,
     }
 
