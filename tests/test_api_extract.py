@@ -164,3 +164,34 @@ def test_extract_mfcc_matrix_ok(client, tmp_path):
     assert payload["band"][0] == fmin
     assert payload["band"][1] == fmax
 
+
+def test_extract_health_matrix_ok(client, tmp_path):
+    wav_path = _make_test_wav(tmp_path, sr=16000, secs=0.7, freq=440.0)
+
+    with open(wav_path, "rb") as f:
+        data = {
+            "file": (f, "sample.wav"),
+        }
+
+        mode = "health_matrix"
+        n_frames = 128
+        fmin = 120
+        fmax = 4800
+
+        resp = client.post(
+            f"/api/v1/extract?mode={mode}&n_frames={n_frames}&fmin={fmin}&fmax={fmax}&pcen=1&down16k=1",
+            data=data,
+            content_type="multipart/form-data",
+        )
+
+    assert resp.status_code == 200, resp.data
+    payload = resp.get_json()
+
+    assert payload["shape"] == [n_frames, 144]
+    assert payload["mode"] == mode
+    assert payload["pcen"] is True
+    assert isinstance(payload["features"], list)
+    assert len(payload["features"]) == n_frames
+    assert all(isinstance(row, list) and len(row) == 144 for row in payload["features"])
+    assert payload["band"] == [fmin, fmax]
+

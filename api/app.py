@@ -13,11 +13,13 @@ from voiceprint_features_144 import extract_mfcc_144, extract_logmel_144
 from voiceprint_features_144.biometric144 import extract_biometric_144
 # Novo modo MFCC em matriz (sem resumo estatístico)
 from voiceprint_features_144.extract_mfcc_matrix import extract_mfcc_matrix
+# Modo saúde temporal (log-mel/pcen + deltas + pitch/energia)
+from voiceprint_features_144.extract_health_matrix import extract_health_matrix
 
 
 # ---------- Helpers puros (reduzem complexidade da rota) ----------
 
-ALLOWED_MODES = {"mfcc", "logmel", "bio_mean144", "bio_mm72", "mfcc_matrix"}
+ALLOWED_MODES = {"mfcc", "logmel", "bio_mean144", "bio_mm72", "mfcc_matrix", "health_matrix"}
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in Config.ALLOWED_EXTENSIONS
@@ -82,6 +84,24 @@ def run_extractor(path: str, mode: str, pcen: bool, down16k: bool) -> Tuple[list
 
         mat, sr, band = extract_mfcc_matrix(path, target_frames=n_frames, fmin=fmin, fmax=fmax)
         return mat.tolist(), int(sr), (int(band[0]), int(band[1])), "mfcc_matrix", False
+
+    if mode == "health_matrix":
+        try:
+            n_frames = int(request.args.get("n_frames", 400))
+            fmin = int(request.args.get("fmin", 100))
+            fmax = int(request.args.get("fmax", 7200))
+        except Exception:
+            raise ValueError("n_frames, fmin ou fmax inválidos")
+
+        mat, sr, band = extract_health_matrix(
+            path,
+            target_frames=n_frames,
+            use_pcen=pcen,
+            force_down_to_16k=down16k,
+            fmin=fmin,
+            fmax=fmax,
+        )
+        return mat.tolist(), int(sr), (int(band[0]), int(band[1])), "health_matrix", bool(pcen)
 
     # default: mfcc (com Δ/ΔΔ + stats → 144D)
     vec, sr, band = extract_mfcc_144(path, force_down_to_16k=down16k)
