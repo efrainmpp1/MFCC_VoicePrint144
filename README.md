@@ -227,6 +227,19 @@ O `health_matrix` é um extrator temporal pensado para sensibilidade a variaçõ
   - Para treinar modelos temporais que avaliem variações de voz relacionadas a saúde ou estado vocal.
   - Para manter compatibilidade com o consumo já existente de matrizes 144D por quadro (sem alterar arquitetura downstream).
 
+### Diferenças principais: `mfcc_matrix` vs. `health_matrix`
+- **Propósito**
+  - `mfcc_matrix`: biometria temporal, focado em MFCC/Δ/ΔΔ clássicos para reconhecimento de locutor.
+  - `health_matrix`: sensibilidade a estado vocal/saúde, combinando Log-Mel/PCEN, energia e pitch.
+- **Features por quadro**
+  - `mfcc_matrix`: 24 MFCC + 24 Δ + 24 ΔΔ (72) duplicados até 144 colunas, todas cepstrais.
+  - `health_matrix`: 48 Log-Mel/PCEN + 48 deltas + energia RMS + pitch (98) replicados/recortados até 144, misturando espectro, dinâmica e prosódia.
+- **Configuração típica**
+  - `mfcc_matrix`: `n_frames` padrão alto (20000), banda segura 100–7000 Hz, sem PCEN.
+  - `health_matrix`: `n_frames` padrão moderado (400), banda 100–7200 Hz, PCEN opcional para robustez a ganho.
+- **Resultado esperado**
+  - Ambos retornam `[n_frames, 144]` normalizado 0–255 por linha, mas com objetivos diferentes: perfil cepstral para biometria (`mfcc_matrix`) versus variações vocais relacionadas a saúde (`health_matrix`).
+
 Example response:
 
 ```json
