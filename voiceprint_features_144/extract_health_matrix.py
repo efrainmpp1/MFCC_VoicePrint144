@@ -7,8 +7,11 @@ from .common_adaptive import to_mono, stft_params_from_sr, safe_voice_band
 
 def _normalize_row_to_uint8(row: np.ndarray) -> np.ndarray:
     """Normaliza um vetor 1D para [0, 255] em uint8."""
-    min_val = row.min()
-    max_val = row.max()
+    finite = row[np.isfinite(row)]
+    if finite.size == 0:
+        return np.zeros_like(row, dtype=np.uint8)
+    min_val = finite.min()
+    max_val = finite.max()
     if max_val - min_val == 0:
         return np.zeros_like(row, dtype=np.uint8)
     norm = (row - min_val) / (max_val - min_val)
@@ -75,7 +78,8 @@ def extract_health_matrix(
     base_t = base.T.astype(np.float32)
     d1_t = d1.T.astype(np.float32)
     energy_col = rms.reshape(-1, 1).astype(np.float32)
-    pitch_col = pitch.reshape(-1, 1).astype(np.float32)
+    pitch_med = float(np.nanmedian(pitch)) if np.isfinite(pitch).any() else 0.0
+    pitch_col = np.where(np.isfinite(pitch), pitch, pitch_med).reshape(-1, 1).astype(np.float32)
 
     min_len = min(base_t.shape[0], d1_t.shape[0], energy_col.shape[0], pitch_col.shape[0])
     base_t = base_t[:min_len]
@@ -84,6 +88,9 @@ def extract_health_matrix(
     pitch_col = pitch_col[:min_len]
 
     full = np.concatenate([base_t, d1_t, energy_col, pitch_col], axis=1)  # (T, 98)
+
+    # Sanitiza NaNs/Infs antes da normalização por linha
+    full = np.nan_to_num(full, nan=0.0, posinf=0.0, neginf=0.0)
 
     # Replica colunas para atingir 144 features/frame
     if full.shape[1] < 144:
