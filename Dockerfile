@@ -24,4 +24,4 @@ COPY . .
 EXPOSE 8000
 
 # Gunicorn lendo FLASK_PORT (padrão 8000 se não setado)
-CMD ["sh", "-c", "gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:${FLASK_PORT:-8000} api.wsgi:app"]
+CMD ["sh", "-c", "gunicorn -w 2 -k gthread --threads 4 --timeout 120 -b 0.0.0.0:${FLASK_PORT:-8000} api.wsgi:app"]
