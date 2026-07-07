@@ -51,16 +51,14 @@ def extract_mfcc_matrix(
     elif full.shape[0] > target_frames:
         full = full[:target_frames, :]
 
-    # Normaliza cada linha/frame para [0, 255] e converte para uint8
-    normalized = np.zeros_like(full, dtype=np.uint8)
-    for i in range(full.shape[0]):
-        row = full[i]
-        min_val = row.min()
-        max_val = row.max()
-        if max_val - min_val == 0:
-            normalized[i] = np.zeros_like(row, dtype=np.uint8)
-        else:
-            norm = (row - min_val) / (max_val - min_val)
-            normalized[i] = np.round(norm * 255).astype(np.uint8)
+    # Normaliza cada linha/frame para [0, 255] e converte para uint8 (vetorizado)
+    row_min = full.min(axis=1, keepdims=True)
+    row_max = full.max(axis=1, keepdims=True)
+    row_range = row_max - row_min
+    safe_range = np.where(row_range == 0, 1, row_range)
+
+    norm = (full - row_min) / safe_range
+    normalized = np.round(norm * 255).astype(np.uint8)
+    normalized[(row_range == 0).squeeze(axis=1)] = 0
 
     return normalized, sr, (fmin, fmax)

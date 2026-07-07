@@ -5,19 +5,6 @@ import librosa
 from .common_adaptive import to_mono, stft_params_from_sr, safe_voice_band
 
 
-def _normalize_row_to_uint8(row: np.ndarray) -> np.ndarray:
-    """Normaliza um vetor 1D para [0, 255] em uint8."""
-    finite = row[np.isfinite(row)]
-    if finite.size == 0:
-        return np.zeros_like(row, dtype=np.uint8)
-    min_val = finite.min()
-    max_val = finite.max()
-    if max_val - min_val == 0:
-        return np.zeros_like(row, dtype=np.uint8)
-    norm = (row - min_val) / (max_val - min_val)
-    return np.round(norm * 255).astype(np.uint8)
-
-
 def extract_health_matrix(
     wav_path: str,
     n_mels: int = 48,
@@ -107,8 +94,15 @@ def extract_health_matrix(
     elif full.shape[0] > target_frames:
         full = full[:target_frames, :]
 
-    normalized = np.zeros_like(full, dtype=np.uint8)
-    for i in range(full.shape[0]):
-        normalized[i] = _normalize_row_to_uint8(full[i])
+    # `full` já passou por np.nan_to_num acima, então não há NaN/Inf remanescente
+    # para tratar por linha — normalização vetorizada é equivalente ao loop anterior.
+    row_min = full.min(axis=1, keepdims=True)
+    row_max = full.max(axis=1, keepdims=True)
+    row_range = row_max - row_min
+    safe_range = np.where(row_range == 0, 1, row_range)
+
+    norm = (full - row_min) / safe_range
+    normalized = np.round(norm * 255).astype(np.uint8)
+    normalized[(row_range == 0).squeeze(axis=1)] = 0
 
     return normalized, sr, (fmin, fmax)
