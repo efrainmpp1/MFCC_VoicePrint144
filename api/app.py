@@ -162,6 +162,7 @@ def create_app() -> Flask:
         try:
             vec, sr, band, mode_final, pcen_final = run_extractor(save_path, mode, pcen, down16k)
             latency = int((time.time() - t0) * 1000)
+            print(f"[mfcc_extractor] mode={mode_final} processamento levou {latency}ms")
             return jsonify(build_payload(vec, sr, band, mode_final, pcen_final, down16k, latency)), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500
