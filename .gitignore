@@ -3,6 +3,8 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+/examples/ptbr_31_speakers_20_wav
+
 # C extensions
 *.so
 
