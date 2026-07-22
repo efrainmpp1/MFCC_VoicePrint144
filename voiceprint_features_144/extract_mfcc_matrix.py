@@ -11,16 +11,14 @@ def extract_mfcc_matrix(
     pre_emphasis: float = 0.97,
     force_down_to_16k: bool = True,
     fmin: int = 100,
-    fmax: int = 7000,
-    vad_top_db: float = 40.0,
-    min_voiced: int = 3,
+    fmax: int = 7000
 ) -> np.ndarray:
     """
     Retorna uma matriz (target_frames, 144), com valores normalizados por frame entre 0–255 (uint8).
-    - 24 MFCCs + 24 Δ + 24 ΔΔ, duplicados por frame (total 144 features/frame)
-    - VAD: descarta frames com energia < vad_top_db abaixo do pico antes de calcular features.
-    - CMS: subtrai a média cepstral estimada sobre os frames voiced, removendo efeito de canal/microfone.
-    - Frames silenciosas são representadas como zeros na matriz final (zero-pad após frames voiced).
+    - 24 MFCCs
+    - 24 Δ
+    - 24 ΔΔ
+    Concatenados e duplicados por linha/frame (total 144 features/frame)
     """
     y, sr = sf.read(wav_path, always_2d=False)
     y = to_mono(y).astype(np.float32)
@@ -38,29 +36,14 @@ def extract_mfcc_matrix(
     M = librosa.feature.mfcc(
         y=y, sr=sr, n_mfcc=n_mfcc, n_mels=n_mels,
         n_fft=n_fft, hop_length=hop, fmin=fmin, fmax=fmax, htk=True
-    )  # (n_mfcc, T)
+    )
+    d1 = librosa.feature.delta(M, order=1)
+    d2 = librosa.feature.delta(M, order=2)
 
-    # VAD: identifica frames voiced via energia RMS
-    rms = librosa.feature.rms(y=y, frame_length=n_fft, hop_length=hop)[0]
-    T = M.shape[1]
-    rms = rms[:T]
-    rms_safe = np.maximum(rms, 1e-10)
-    rms_db = 20.0 * np.log10(rms_safe / (rms_safe.max() + 1e-10))
-    voiced_mask = rms_db > -vad_top_db
-    if voiced_mask.sum() < min_voiced:
-        voiced_mask = np.ones(T, dtype=bool)
+    full = np.concatenate([M, d1, d2], axis=0).astype(np.float32)  # (72, T)
+    full = full.T  # (T, 72)
 
-    # CMS: subtrai média cepstral dos frames voiced — remove efeito de canal/microfone
-    M_voiced = M[:, voiced_mask]  # (n_mfcc, T_voiced)
-    M_cms = M_voiced - M_voiced.mean(axis=1, keepdims=True)
-
-    d1 = librosa.feature.delta(M_cms, order=1)
-    d2 = librosa.feature.delta(M_cms, order=2)
-
-    full = np.concatenate([M_cms, d1, d2], axis=0).astype(np.float32)  # (72, T_voiced)
-    full = full.T  # (T_voiced, 72)
-
-    full = np.concatenate([full, full], axis=1)  # (T_voiced, 144)
+    full = np.concatenate([full, full], axis=1)  # (T, 144)
 
     if full.shape[0] < target_frames:
         pad = np.zeros((target_frames - full.shape[0], full.shape[1]), dtype=np.float32)
