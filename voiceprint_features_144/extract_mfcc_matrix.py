@@ -69,10 +69,11 @@ def extract_mfcc_matrix(
     normalized = np.round(norm * 255).astype(np.uint8)
     normalized[:, (col_range == 0).squeeze(axis=0)] = 0
 
-    # Preenche com zeros SOMENTE depois de normalizar, para o padding não
-    # contaminar o min/max real de cada coluna.
+    # Completa com os próprios frames reais repetidos ciclicamente (em vez de
+    # zero-padding), feito SOMENTE depois de normalizar para não contaminar o
+    # min/max real de cada coluna.
     if normalized.shape[0] < target_frames:
-        pad = np.zeros((target_frames - normalized.shape[0], normalized.shape[1]), dtype=np.uint8)
-        normalized = np.vstack([normalized, pad])
+        repeat_times = int(np.ceil(target_frames / normalized.shape[0]))
+        normalized = np.tile(normalized, (repeat_times, 1))[:target_frames, :]
 
     return normalized, sr, (fmin, fmax)
