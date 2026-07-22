@@ -57,32 +57,10 @@ def extract_mfcc_matrix(
     d1 = librosa.feature.delta(M_cms, order=1)
     d2 = librosa.feature.delta(M_cms, order=2)
 
-    # --- Primeira metade (cols 0–71): MFCC + Δ + ΔΔ ---
-    first_half = np.concatenate([M_cms, d1, d2], axis=0).astype(np.float32)  # (72, T_voiced)
+    full = np.concatenate([M_cms, d1, d2], axis=0).astype(np.float32)  # (72, T_voiced)
+    full = full.T  # (T_voiced, 72)
 
-    # --- Segunda metade (cols 72–143): Mel + Mel-Δ + RMS + Pitch ---
-    # 46 Log-Mel filterbank bands sobre frames voiced
-    mel_spec = librosa.feature.melspectrogram(
-        y=y, sr=sr, n_mels=46, n_fft=n_fft, hop_length=hop, fmin=fmin, fmax=fmax
-    )
-    mel_db = librosa.power_to_db(mel_spec, ref=np.max)  # (46, T)
-    mel_voiced = mel_db[:, voiced_mask[:mel_db.shape[1]]]   # (46, T_voiced)
-
-    # 24 Mel-Δ (dinâmica espectral)
-    mel_d1 = librosa.feature.delta(mel_voiced, order=1)[:24, :]  # (24, T_voiced)
-
-    # 1 RMS energy (reutiliza o calculado para VAD)
-    rms_voiced = rms[voiced_mask].reshape(1, -1).astype(np.float32)  # (1, T_voiced)
-
-    # 1 Pitch F0 via YIN — principal discriminador entre gêmeos univitelinos
-    f0 = librosa.yin(y, fmin=80.0, fmax=500.0, sr=sr, hop_length=hop)  # (T_f0,)
-    f0 = f0[:T][voiced_mask]  # alinha com T e filtra voiced
-    f0_median = float(np.nanmedian(f0)) if not np.all(np.isnan(f0)) else 0.0
-    f0 = np.nan_to_num(f0, nan=f0_median).reshape(1, -1).astype(np.float32)  # (1, T_voiced)
-
-    second_half = np.concatenate([mel_voiced, mel_d1, rms_voiced, f0], axis=0).astype(np.float32)  # (72, T_voiced)
-
-    full = np.concatenate([first_half, second_half], axis=0).T  # (T_voiced, 144)
+    full = np.concatenate([full, full], axis=1)  # (T_voiced, 144)
 
     if full.shape[0] < target_frames:
         pad = np.zeros((target_frames - full.shape[0], full.shape[1]), dtype=np.float32)
