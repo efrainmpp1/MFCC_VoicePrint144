@@ -14,11 +14,13 @@ def extract_mfcc_matrix(
     fmax: int = 7000
 ) -> np.ndarray:
     """
-    Retorna uma matriz (target_frames, 144), com valores normalizados por frame entre 0–255 (uint8).
-    - 24 MFCCs
-    - 24 Δ
-    - 24 ΔΔ
-    Concatenados e duplicados por linha/frame (total 144 features/frame)
+    Retorna uma matriz (target_frames, 144), com valores normalizados por
+    coluna (por dimensão de feature, ao longo do tempo) entre 0-255 (uint8).
+    - 23 MFCCs (c0/energia bruta descartado, escala de centenas dominava a
+      normalização e esmagava as demais colunas quando normalizado por linha)
+    - 24 Δ (inclui delta de c0)
+    - 24 ΔΔ (inclui delta-delta de c0)
+    Replicado/recortado até 144 features/frame.
     """
     y, sr = sf.read(wav_path, always_2d=False)
     y = to_mono(y).astype(np.float32)
@@ -40,25 +42,38 @@ def extract_mfcc_matrix(
     d1 = librosa.feature.delta(M, order=1)
     d2 = librosa.feature.delta(M, order=2)
 
-    full = np.concatenate([M, d1, d2], axis=0).astype(np.float32)  # (72, T)
-    full = full.T  # (T, 72)
+    M_no_c0 = M[1:]  # descarta c0 (energia bruta absoluta)
 
-    full = np.concatenate([full, full], axis=1)  # (T, 144)
+    full = np.concatenate([M_no_c0, d1, d2], axis=0).astype(np.float32)  # (3*n_mfcc-1, T)
+    full = full.T  # (T, 3*n_mfcc-1)
 
-    if full.shape[0] < target_frames:
-        pad = np.zeros((target_frames - full.shape[0], full.shape[1]), dtype=np.float32)
-        full = np.vstack([full, pad])
-    elif full.shape[0] > target_frames:
+    n_features = full.shape[1]
+    if n_features < 144:
+        repeat_times = int(np.ceil(144 / n_features))
+        full = np.tile(full, (1, repeat_times))[:, :144]
+    elif n_features > 144:
+        full = full[:, :144]
+
+    # Trunca ANTES de normalizar, para o cálculo de min/max por coluna refletir
+    # exatamente a janela de frames que será persistida.
+    if full.shape[0] > target_frames:
         full = full[:target_frames, :]
 
-    # Normaliza cada linha/frame para [0, 255] e converte para uint8 (vetorizado)
-    row_min = full.min(axis=1, keepdims=True)
-    row_max = full.max(axis=1, keepdims=True)
-    row_range = row_max - row_min
-    safe_range = np.where(row_range == 0, 1, row_range)
+    # Normaliza cada coluna (feature) ao longo do tempo para [0, 255].
+    col_min = full.min(axis=0, keepdims=True)
+    col_max = full.max(axis=0, keepdims=True)
+    col_range = col_max - col_min
+    safe_range = np.where(col_range == 0, 1, col_range)
 
-    norm = (full - row_min) / safe_range
+    norm = (full - col_min) / safe_range
     normalized = np.round(norm * 255).astype(np.uint8)
-    normalized[(row_range == 0).squeeze(axis=1)] = 0
+    normalized[:, (col_range == 0).squeeze(axis=0)] = 0
+
+    # Completa com os próprios frames reais repetidos ciclicamente (em vez de
+    # zero-padding), feito SOMENTE depois de normalizar para não contaminar o
+    # min/max real de cada coluna.
+    if normalized.shape[0] < target_frames:
+        repeat_times = int(np.ceil(target_frames / normalized.shape[0]))
+        normalized = np.tile(normalized, (repeat_times, 1))[:target_frames, :]
 
     return normalized, sr, (fmin, fmax)

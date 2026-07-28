@@ -24,7 +24,7 @@ def extract_health_matrix(
       - energia RMS (1 coluna)
       - pitch estimado (1 coluna, em Hz)
     O conjunto (98 colunas) é replicado/recortado até 144 colunas
-    e cada linha é normalizada para [0, 255] (uint8).
+    e cada coluna (feature, ao longo do tempo) é normalizada para [0, 255] (uint8).
     """
 
     y, sr = sf.read(wav_path, always_2d=False)
@@ -76,7 +76,7 @@ def extract_health_matrix(
 
     full = np.concatenate([base_t, d1_t, energy_col, pitch_col], axis=1)  # (T, 98)
 
-    # Sanitiza NaNs/Infs antes da normalização por linha
+    # Sanitiza NaNs/Infs antes da normalização por coluna
     full = np.nan_to_num(full, nan=0.0, posinf=0.0, neginf=0.0)
 
     # Replica colunas para atingir 144 features/frame
@@ -87,22 +87,28 @@ def extract_health_matrix(
     elif full.shape[1] > 144:
         full = full[:, :144]
 
-    # Ajusta número de frames
-    if full.shape[0] < target_frames:
-        pad = np.zeros((target_frames - full.shape[0], full.shape[1]), dtype=np.float32)
-        full = np.vstack([full, pad])
-    elif full.shape[0] > target_frames:
+    # Trunca ANTES de normalizar, para o cálculo de min/max por coluna refletir
+    # exatamente a janela de frames que será persistida.
+    if full.shape[0] > target_frames:
         full = full[:target_frames, :]
 
-    # `full` já passou por np.nan_to_num acima, então não há NaN/Inf remanescente
-    # para tratar por linha — normalização vetorizada é equivalente ao loop anterior.
-    row_min = full.min(axis=1, keepdims=True)
-    row_max = full.max(axis=1, keepdims=True)
-    row_range = row_max - row_min
-    safe_range = np.where(row_range == 0, 1, row_range)
+    # Normaliza cada coluna (feature) ao longo do tempo para [0, 255]. Evita que
+    # uma feature de escala maior (ex: pitch em Hz) domine o range de outra
+    # (ex: delta de banda Mel, escala bem menor) como acontecia por linha.
+    col_min = full.min(axis=0, keepdims=True)
+    col_max = full.max(axis=0, keepdims=True)
+    col_range = col_max - col_min
+    safe_range = np.where(col_range == 0, 1, col_range)
 
-    norm = (full - row_min) / safe_range
+    norm = (full - col_min) / safe_range
     normalized = np.round(norm * 255).astype(np.uint8)
-    normalized[(row_range == 0).squeeze(axis=1)] = 0
+    normalized[:, (col_range == 0).squeeze(axis=0)] = 0
+
+    # Completa com os próprios frames reais repetidos ciclicamente (em vez de
+    # zero-padding), feito depois de normalizar (equivalente, já que cada
+    # linha duplicada repete os mesmos valores já normalizados).
+    if normalized.shape[0] < target_frames:
+        repeat_times = int(np.ceil(target_frames / normalized.shape[0]))
+        normalized = np.tile(normalized, (repeat_times, 1))[:target_frames, :]
 
     return normalized, sr, (fmin, fmax)

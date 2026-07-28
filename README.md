@@ -1,77 +1,149 @@
 # MFCC_VoicePrint144
 
-Extract a fixed **144-dimensional audio feature vector** from any `.wav` file for **speaker biometrics and voice analysis**.
-This project standardizes feature extraction using **MFCC + Δ + ΔΔ** or **Log-Mel (+PCEN)** within the human voice band (100–7200 Hz).
-It provides three interfaces: **CLI**, **Python API**, and a **REST API (Flask)**.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.1.0-informational.svg)](pyproject.toml)
+
+Fixed-size **144-dimensional audio feature extraction** for speaker biometrics and
+voice-health analysis. Every extractor in this library — whether it returns a single
+pooled vector or a full per-frame matrix — always produces exactly **144 features**,
+so downstream consumers never have to branch on feature dimensionality.
+
+The library is exposed through three interfaces:
+
+- a **Python API** (import and call directly),
+- a **CLI** (`python -m voiceprint_features_144.cli`, or `vw-extract` once installed),
+- and a **Flask REST API** (used in production as the `mfcc_extractor` Docker service
+  consumed by the `voicewaves-backend` Node application).
 
 ---
 
-## 📦 Features
+## Table of contents
 
-- **MFCC 144D** → 24 MFCC × (static, Δ, ΔΔ) × (mean, std) = 144
-- **Log-Mel 144D** → 48 Mel bands × (mean, std, median) = 144
-- **MFCC matrix (frames × 144)** → MFCC/Δ/ΔΔ por quadro, duplicados para 144 colunas, com padding/clipping para `n_frames` e normalização 0–255
-- **Health matrix (frames × 144)** → Log-Mel/PCEN por quadro (48 bandas) + deltas + energia + pitch, replicados até 144 colunas
-- **Adaptive STFT** (25 ms window / 10 ms hop, scaled to sample rate)
-- **Safe frequency band:** 100–7200 Hz (clamped at 0.45 × sample rate)
-- **Optional PCEN** for Log-Mel, robust to gain/recording differences
-- **Consistent embeddings** across devices and sample rates
-- **API-ready**: extract features via REST endpoint with form-data upload
-- **Automated tests** with `pytest` for reliability
-
-## 🎛️ Feature Extraction Parameters
-
-| **Stage**           | **Parameter**          | **Value / Notes**                                            |
-| ------------------- | ---------------------- | ------------------------------------------------------------ |
-| **Pre-emphasis**    | Filter                 | `y[t] = x[t] – 0.97 × x[t-1]` (boosts high frequencies)      |
-| **Framing**         | Window length          | 25 ms (\~400 samples @ 16 kHz)                               |
-|                     | Hop length             | 10 ms (\~160 samples @ 16 kHz)                               |
-| **FFT / STFT**      | FFT size (`n_fft`)     | 512 (adaptive to sample rate)                                |
-| **Frequency range** | `fmin`                 | 100 Hz (cut-off below human voice)                           |
-|                     | `fmax`                 | 7200 Hz (upper band for human voice, clamped at `0.45 × sr`) |
-| **MFCC branch**     | # of MFCC coefficients | 24 (excluding 0th)                                           |
-|                     | Δ (delta)              | 1st temporal derivative (captures dynamics)                  |
-|                     | ΔΔ (delta-delta)       | 2nd temporal derivative (captures acceleration)              |
-|                     | Statistics             | Mean + Std (per coef.)                                       |
-|                     | Vector composition     | 24 × (static + Δ + ΔΔ) × 2 stats = **144D**                  |
-| **Log-Mel branch**  | # of Mel bands         | 48                                                           |
-|                     | PCEN (optional)        | Per-Channel Energy Normalization for robustness              |
-|                     | Statistics             | Mean + Std + Median                                          |
-|                     | Vector composition     | 48 × 3 stats = **144D**                                      |
-| **Pooling**         | Method                 | Statistical pooling over all frames → fixed-length vector    |
-| **Output**          | Shape                  | `[144]` (consistent across duration and device sample rate)  |
-
-## 📂 Repository structure
-
-```
-MFCC_VoicePrint144/
-├─ README.md
-├─ requirements.txt
-├─ examples/
-│   └─ sample.wav
-├─ voiceprint_features_144/
-│   ├─ __init__.py
-│   ├─ cli.py
-│   ├─ common_adaptive.py
-│   ├─ mfcc144.py
-│   └─ mel144.py
-├─ api/
-│   ├─ __init__.py
-│   ├─ app.py
-│   ├─ config.py
-│   ├─ wsgi.py
-│   └─ uploads/
-├─ tests/
-│   ├─ test_api_extract.py
-│   └─ test_feature_extractors.py
-└─ .github/ (optional CI/CD workflows in future)
-```
+- [Extraction modes](#extraction-modes)
+- [`mfcc_matrix` and `health_matrix` in detail](#mfcc_matrix-and-health_matrix-in-detail)
+- [Business rules](#business-rules)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Project structure](#project-structure)
+- [Testing](#testing)
+- [Docker](#docker)
+- [License](#license)
 
 ---
 
-## ⚙️ Installation
+## Extraction modes
 
-Create a virtual environment and install dependencies:
+Six extraction modes are available, selected via `mode=` (API) or `--mode` (CLI).
+All of them are adaptive to sample rate (25 ms window / 10 ms hop, scaled to `sr`)
+and clamp their frequency band to a safe voice range via `safe_voice_band`
+(`fmin`/`fmax`, capped at `0.45 × sr`).
+
+| Mode | Shape | Output type | Signal processing | Purpose |
+| --- | --- | --- | --- | --- |
+| `mfcc` | `[144]` | mean+std pooled vector | 24 MFCC, **VAD** (−40 dB RMS gate) + **CMS** (cepstral mean subtraction over voiced frames), Δ, ΔΔ | Speaker identity, VAD/CMS-robust to silence and channel bias |
+| `logmel` | `[144]` | mean+std+median pooled vector | 48-band Log-Mel or PCEN, no VAD/delta | Lightweight spectral-shape fingerprint |
+| `bio_mean144` | `[144]` | mean-only pooled vector | 144-band Log-Mel/PCEN | Pure structural signature, no temporal variance |
+| `bio_mm72` | `[144]` | mean+median pooled vector | 72-band Log-Mel/PCEN | Structural signature, robust to outlier frames |
+| `mfcc_matrix` | `[target_frames, 144]` | per-frame matrix, `uint8` 0–255 | 23 MFCC (c0 dropped) + Δ + ΔΔ | Biometric identity (AS/perfil creation) |
+| `health_matrix` | `[target_frames, 144]` | per-frame matrix, `uint8` 0–255 | 48-band Mel/PCEN + Δ + RMS energy + pitch (YIN) | Vocal-state / health modulation tracking |
+
+`mfcc`, `logmel`, `bio_mean144` and `bio_mm72` collapse the whole clip into a single
+144-value vector via statistical pooling. `mfcc_matrix` and `health_matrix` instead
+preserve the temporal axis — one row per 10 ms frame — which is why they need the
+extra normalization and padding rules described below.
+
+---
+
+## `mfcc_matrix` and `health_matrix` in detail
+
+These two modes are the ones actively used by the `voicewaves-backend` production
+pipeline, and the ones this document tracks most closely as they evolve.
+
+### Column composition
+
+| | `mfcc_matrix` | `health_matrix` |
+| --- | --- | --- |
+| Real columns before tiling | 71 | 98 |
+| Composition | 23 MFCC (**c0 dropped**) + 24 Δ (incl. Δ of c0) + 24 ΔΔ (incl. ΔΔ of c0) | 48 Mel/PCEN bands + 48 Δ + 1 RMS energy + 1 pitch (Hz, via YIN) |
+| Tiled/cropped to | 144 columns | 144 columns |
+| Default `target_frames` | 20000 | 400 |
+| Default `fmin` / `fmax` | 100 / 7000 Hz | 100 / 7200 Hz |
+
+`c0` — the raw MFCC log-energy coefficient — is deliberately excluded from
+`mfcc_matrix`'s feature set. Its absolute scale (hundreds) is an order of magnitude
+larger than every other MFCC coefficient and delta (tens), and highly sensitive to
+microphone gain rather than speaker identity. Its Δ and ΔΔ are still included, since
+first/second-order dynamics of energy remain informative and are far smaller in
+scale.
+
+### Normalization: per column, not per row
+
+Each of the 144 output columns is **min-max normalized to `[0, 255]` independently**,
+using only the clip's real (non-padded) frames:
+
+```
+normalized[:, j] = round((raw[:, j] - min(raw[:, j])) / (max(raw[:, j]) - min(raw[:, j])) * 255)
+```
+
+This replaced an earlier per-row normalization scheme. Per-row normalization let
+whichever feature had the largest absolute scale in a given frame — raw MFCC `c0` in
+`mfcc_matrix`, or pitch in Hz in `health_matrix` — dominate that row's min/max range,
+compressing every other feature's real variation into a narrow band near 255 and
+destroying most of its resolution once quantized to `uint8`. Per-column normalization
+gives every feature its own dynamic range, so no single feature can crush another's.
+
+As a side effect, per-column min-max normalization is invariant to a constant
+additive offset within a single recording — so a fixed microphone/channel bias on a
+given feature (assuming it stays constant for the duration of one clip) cancels out
+automatically. It does **not** filter out background noise or make dynamic ranges
+directly comparable *across* recordings made under different noise conditions.
+
+### Frame count: cyclic repetition instead of zero-padding
+
+Both extractors must always return exactly `[target_frames, 144]`. What happens when
+the real audio doesn't have that many frames — the common case, since typical
+recordings here are ~5 seconds (≈500–600 frames of real signal) against a
+`target_frames` of 20000 for `mfcc_matrix`:
+
+- **Real frames < `target_frames`** (the common, short-clip case): the real frames
+  are normalized first, then **tiled cyclically** (`np.tile` + truncate) to fill the
+  remaining rows. The real signal repeats until the matrix is full — there are no
+  all-zero filler rows.
+- **Real frames > `target_frames`**: the matrix is truncated to the first
+  `target_frames` rows before normalization. No repetition happens in this
+  direction.
+
+This replaced an earlier scheme that zero-padded short clips — for a 5-second clip
+against `target_frames=20000`, that meant well over 95% of every output matrix was
+literally zero. Zero-padding also risked skewing per-column min/max if it had been
+computed after padding; normalization here always runs on the real window first, so
+padding (whichever form) never affects the real values' scale.
+
+---
+
+## Business rules
+
+- Output shape is always exactly `[target_frames, 144]`, dtype `uint8`, values in
+  `0–255` — no exceptions, regardless of clip length.
+- Normalization and frame-count adjustment always operate on the real captured
+  window only; padding never influences the real values' scale.
+- `mfcc_matrix` output feeds AS/perfil biometric **identity** creation in
+  `voicewaves-backend`; `health_matrix` output feeds the "modulação" vocal-state
+  **comparison** pipeline. The two are not interchangeable — a `health_matrix` file
+  cannot be consumed where an `mfcc_matrix` file is expected, or vice versa.
+- Files generated by the current normalization scheme (per-column, cyclic-fill) are
+  **not directly value-comparable** to files generated by the older scheme (per-row,
+  zero-padded). Any comparison or centroid computation mixing the two eras will
+  produce misleading results.
+
+---
+
+## Installation
+
+Requires **Python 3.12+**. System dependencies `ffmpeg` and `libsndfile1` are needed
+for audio decoding (`soundfile`/`librosa`) and for `.ogg`→`.wav` batch conversion
+(see [`scripts/`](#usage)).
 
 ```bash
 python -m venv .venv
@@ -82,163 +154,95 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-Dependencies:
-
-- `numpy`
-- `librosa`
-- `soundfile`
-- `resampy`
-- `flask`
-- `pytest` (for tests)
+Core dependencies: `numpy`, `librosa`, `soundfile`, `resampy`, `flask`, `gunicorn`
+(production server), `pytest` (tests). See [`requirements.txt`](requirements.txt) for
+pinned versions.
 
 ---
 
-## 🖥️ Usage (CLI)
+## Usage
 
-Run the extractor on a `.wav` file:
-
-```bash
-# MFCC 144D
-python -m voiceprint_features_144.cli examples/sample.wav --mode mfcc
-
-# Log-Mel 144D (with PCEN)
-python -m voiceprint_features_144.cli examples/sample.wav --mode logmel --pcen
-
-# Health matrix (temporal, 144 cols/frame)
-python -m voiceprint_features_144.cli examples/sample.wav --mode health_matrix --pcen --n-frames 256
-```
-
-### Options
-
-- `--mode {mfcc|logmel|health_matrix}` → choose extractor (default: `mfcc`)
-- `--pcen` → enable PCEN (for `logmel` or `health_matrix`)
-- `--no-down16k` → do not downsample to 16 kHz when sr > 16k
-- `--n-frames` / `--fmin` / `--fmax` → only for `health_matrix` (temporal output)
-- `--out file.json` → save JSON output
-
----
-
-## 🐍 Usage (Python API)
+### Python API
 
 ```python
 from voiceprint_features_144 import extract_mfcc_144, extract_logmel_144
+from voiceprint_features_144.extract_mfcc_matrix import extract_mfcc_matrix
+from voiceprint_features_144.extract_health_matrix import extract_health_matrix
 
-# MFCC 144D
-vec, sr, band = extract_mfcc_144("examples/sample.wav")
-print(vec.shape)   # (144,)
-print(sr, band)    # e.g., 16000, (100, 7200)
+# Pooled 144D vector
+vec, sr, band = extract_mfcc_144("path/to/audio.wav")
+print(vec.shape)  # (144,)
 
-# Log-Mel 144D (with PCEN)
-vec, sr, band = extract_logmel_144("examples/sample.wav", use_pcen=True)
+# Per-frame biometric identity matrix
+matrix, sr, band = extract_mfcc_matrix("path/to/audio.wav", target_frames=20000)
+print(matrix.shape, matrix.dtype)  # (20000, 144) uint8
+
+# Per-frame vocal-health matrix
+matrix, sr, band = extract_health_matrix("path/to/audio.wav", target_frames=400)
+print(matrix.shape, matrix.dtype)  # (400, 144) uint8
 ```
 
-Output example:
+### CLI
 
-```json
-{
-  "sr": 16000,
-  "band": [100, 7200],
-  "mode": "mfcc",
-  "shape": [144],
-  "features": [ ... 144 floats ... ]
-}
+```bash
+python -m voiceprint_features_144.cli path/to/audio.wav --mode mfcc
+python -m voiceprint_features_144.cli path/to/audio.wav --mode logmel --pcen
+python -m voiceprint_features_144.cli path/to/audio.wav --mode health_matrix --n-frames 400 --pcen
 ```
 
----
+The console script `vw-extract` (installed via `pip install -e .`) is an equivalent
+shortcut for the same CLI. Only `mfcc`, `logmel` and `health_matrix` are available
+through the CLI; `mfcc_matrix` (and `bio_mean144`/`bio_mm72`) are reachable via the
+Python API and the REST API described below.
 
-## 🌐 Usage (REST API)
+**Options**: `--mode {mfcc|logmel|health_matrix}` (default `mfcc`) · `--pcen`
+(enable PCEN for `logmel`/`health_matrix`) · `--no-down16k` (skip forced 16 kHz
+downsampling) · `--n-frames` / `--fmin` / `--fmax` (`health_matrix` only) · `--out
+file.json` (write JSON to disk instead of stdout).
 
-Start the Flask server:
+### REST API
+
+Start the server:
 
 ```bash
 export FLASK_APP=api/wsgi.py
 flask run --host=0.0.0.0 --port=8000
 ```
 
-### Modes & query params
+In production this runs as the `mfcc_extractor` Docker service (see
+[Docker](#docker)), called over HTTP by `voicewaves-backend`'s
+`AudioFeatureExtractionService`.
 
-| Mode            | Output                                                              | Key params (query)                                                               |
-| --------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `mfcc`          | `[144]` (MFCC + Δ + ΔΔ, mean/std)                                    | `down16k=0|1`                                                                    |
-| `logmel`        | `[144]` (Log-Mel, mean/std/med)                                      | `pcen=0|1`, `down16k=0|1`                                                        |
-| `bio_mean144`   | `[144]` (48 bandas, apenas média)                                    | `pcen=0|1`, `down16k=0|1`                                                        |
-| `bio_mm72`      | `[144]` (72 bandas, média+mediana)                                   | `pcen=0|1`, `down16k=0|1`                                                        |
-| `mfcc_matrix`   | `[n_frames, 144]` (MFCC/Δ/ΔΔ por quadro, normalizado 0–255)          | `n_frames` (default 20000), `fmin` (100), `fmax` (7000)                          |
-| `health_matrix` | `[n_frames, 144]` (Log-Mel/PCEN + delta + energia + pitch, 0–255)    | `n_frames` (default 400), `fmin` (100), `fmax` (7200), `pcen=0|1`, `down16k=0|1` |
-### Endpoints
+**Endpoints**
 
-- **Health check**
+```
+GET  /health
+POST /api/v1/extract?mode=mfcc|logmel|bio_mean144|bio_mm72|mfcc_matrix|health_matrix
+     form-data: file=@audio.wav
+```
 
-  ```
-  GET /health
-  → {"status": "ok"}
-  ```
+Query params by mode:
 
-- **Feature extraction**
+| Mode | Params |
+| --- | --- |
+| `mfcc` | `down16k=0\|1` |
+| `logmel` | `pcen=0\|1`, `down16k=0\|1` |
+| `bio_mean144`, `bio_mm72` | `pcen=0\|1`, `down16k=0\|1` |
+| `mfcc_matrix` | `n_frames` (default `20000`), `fmin` (`100`), `fmax` (`7000`) |
+| `health_matrix` | `n_frames` (default `400`), `fmin` (`100`), `fmax` (`7200`), `pcen=0\|1`, `down16k=0\|1` |
 
-  ```
-  POST /api/v1/extract?mode=mfcc|logmel|bio_mean144|bio_mm72|mfcc_matrix|health_matrix&pcen=0|1&down16k=0|1
-  form-data: audio=@file.wav
-  ```
-
-Example request (with curl):
+Example requests:
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/extract?mode=logmel&pcen=1" \
-  -F "audio=@examples/sample.wav"
+  -F "file=@path/to/audio.wav"
+
+curl -X POST "http://localhost:8000/api/v1/extract?mode=mfcc_matrix&n_frames=20000&fmin=100&fmax=7000" \
+  -F "file=@path/to/audio.wav"
+
+curl -X POST "http://localhost:8000/api/v1/extract?mode=health_matrix&n_frames=400&pcen=1" \
+  -F "file=@path/to/audio.wav"
 ```
-
-Example request for temporal biometrics (`mfcc_matrix`):
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/extract?mode=mfcc_matrix&n_frames=400&fmin=80&fmax=7200" \
-  -F "audio=@examples/sample.wav"
-```
-
-Example request for health matrix (`health_matrix`, com PCEN):
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/extract?mode=health_matrix&n_frames=256&fmin=120&fmax=4800&pcen=1" \
-  -F "audio=@examples/sample.wav"
-```
-
-### Sobre o modo `health_matrix`
-
-O `health_matrix` é um extrator temporal pensado para sensibilidade a variações de voz relacionadas a saúde (ex.: fadiga, rouquidão, gripe), mantendo 144 features por quadro e formato compatível com o pipeline de biometria.
-
-- **O que ele calcula por quadro**
-  - 48 bandas Log-Mel (ou PCEN se `pcen=1`)
-  - 48 deltas de primeira ordem
-  - Energia RMS (1 coluna)
-  - Pitch estimado (1 coluna, em Hz)
-  - As 98 colunas resultantes são replicadas/recortadas até 144 para manter consistência com outros modos.
-
-- **Normalização e forma**
-  - Cada linha é normalizada individualmente para o intervalo **0–255** (`uint8`).
-  - A matriz final tem shape `[n_frames, 144]`, fazendo **padding** com zeros ou corte para atingir `n_frames`.
-
-- **Parâmetros configuráveis (query ou CLI)**
-  - `n_frames` (padrão `400`): total de quadros desejados na saída.
-  - `fmin` / `fmax` (padrão `100` / `7200`): faixa de frequências passada ao banco Mel e estimativa de pitch (respeita o clamp de voz segura via `safe_voice_band`).
-  - `pcen` (`0|1`, padrão `0`): ativa PCEN em vez de dB para maior robustez a variações de ganho.
-  - `down16k` (`0|1`, padrão `1`): força downsample para 16 kHz quando o áudio estiver acima disso.
-
-- **Quando usar**
-  - Para treinar modelos temporais que avaliem variações de voz relacionadas a saúde ou estado vocal.
-  - Para manter compatibilidade com o consumo já existente de matrizes 144D por quadro (sem alterar arquitetura downstream).
-
-### Diferenças principais: `mfcc_matrix` vs. `health_matrix`
-- **Propósito**
-  - `mfcc_matrix`: biometria temporal, focado em MFCC/Δ/ΔΔ clássicos para reconhecimento de locutor.
-  - `health_matrix`: sensibilidade a estado vocal/saúde, combinando Log-Mel/PCEN, energia e pitch.
-- **Features por quadro**
-  - `mfcc_matrix`: 24 MFCC + 24 Δ + 24 ΔΔ (72) duplicados até 144 colunas, todas cepstrais.
-  - `health_matrix`: 48 Log-Mel/PCEN + 48 deltas + energia RMS + pitch (98) replicados/recortados até 144, misturando espectro, dinâmica e prosódia.
-- **Configuração típica**
-  - `mfcc_matrix`: `n_frames` padrão alto (20000), banda segura 100–7000 Hz, sem PCEN.
-  - `health_matrix`: `n_frames` padrão moderado (400), banda 100–7200 Hz, PCEN opcional para robustez a ganho.
-- **Resultado esperado**
-  - Ambos retornam `[n_frames, 144]` normalizado 0–255 por linha, mas com objetivos diferentes: perfil cepstral para biometria (`mfcc_matrix`) versus variações vocais relacionadas a saúde (`health_matrix`).
 
 Example response:
 
@@ -255,36 +259,95 @@ Example response:
 }
 ```
 
+### Batch scripts
+
+Two standalone scripts under [`scripts/`](scripts/) run extraction locally over a
+folder of files, without going through the HTTP API — used to validate changes
+against real datasets in [`examples/`](examples/).
+
+- **`batch_wav_to_txtgz.py`** — walks a folder of `.wav` files, runs
+  `extract_mfcc_matrix` on each, and writes gzip-compressed, whitespace-separated
+  `.txt.gz` matrices to an output folder, mirroring the input's subfolder structure.
+
+  ```bash
+  python scripts/batch_wav_to_txtgz.py path/to/wav_folder --out path/to/output --n-frames 20000
+  ```
+
+- **`batch_ogg_to_health_txtgz.py`** — converts `.ogg` voice notes (e.g. WhatsApp
+  PTT recordings) to `.wav` via `ffmpeg` (mono, 44100 Hz, PCM16 — matching
+  `voicewaves-backend`'s own audio-conversion parameters), then runs
+  `extract_health_matrix` on each and writes `.txt.gz` matrices, mirroring the
+  input's subfolder structure (e.g. one subfolder per labeled vocal state).
+
+  ```bash
+  python scripts/batch_ogg_to_health_txtgz.py path/to/ogg_folder --out path/to/output --n-frames 20000
+  ```
+
 ---
 
-## 🔬 Notes
+## Project structure
 
-- If `sr < 16k`, no upsampling; `fmax` is clamped to `0.45*sr`.
-- For `sr ≥ 16k`, audio is downsampled to 16k by default (configurable).
-- Apply **z-score normalization** with training dataset statistics before NN usage.
-- Use `mfcc_matrix` when you need the full sequência de MFCC/Δ/ΔΔ por quadro para modelos temporais de biometria.
+```
+MFCC_VoicePrint144/
+├── README.md
+├── LICENSE
+├── pyproject.toml
+├── requirements.txt
+├── Dockerfile
+├── api/
+│   ├── __init__.py
+│   ├── app.py
+│   ├── config.py
+│   ├── wsgi.py
+│   └── uploads/            # created at runtime, not checked in
+├── voiceprint_features_144/
+│   ├── __init__.py
+│   ├── cli.py
+│   ├── common_adaptive.py     # shared STFT/band-safety helpers
+│   ├── mfcc144.py              # `mfcc` mode
+│   ├── mel144.py                # `logmel` mode
+│   ├── biometric144.py         # `bio_mean144` / `bio_mm72` modes
+│   ├── extract_mfcc_matrix.py  # `mfcc_matrix` mode
+│   └── extract_health_matrix.py # `health_matrix` mode
+├── scripts/
+│   ├── batch_wav_to_txtgz.py
+│   └── batch_ogg_to_health_txtgz.py
+├── tests/
+│   ├── conftest.py
+│   ├── test_api_extract.py
+│   └── test_health_extractor.py
+└── examples/                # local datasets used for manual validation
+```
 
 ---
 
-## 🧪 Running tests
-
-Run all tests with:
+## Testing
 
 ```bash
 pytest -q tests
 ```
 
-Output (example):
-
-```
-..........                                                                                                           [100%]
-10 passed in 1.76s
-```
+- **`test_api_extract.py`** — Flask test-client integration tests against
+  `/api/v1/extract`: happy paths for all six modes, missing/invalid file handling,
+  sample-rate downsampling behavior, and shape/param checks for `mfcc_matrix` and
+  `health_matrix`.
+- **`test_health_extractor.py`** — unit tests directly against
+  `extract_health_matrix`: output shape/dtype/value-range checks and robustness to
+  degenerate pitch input (silence/noise).
 
 ---
 
-## 📜 License
+## Docker
 
-This project is licensed under the **MIT License**.
-You are free to use, modify, and distribute this software, provided that the original license and copyright notice are included in all copies or substantial portions of the software.
-See the [LICENSE](LICENSE) file for details.
+The Flask API is packaged as a standalone service (`Dockerfile`, base image
+`python:3.12-slim`) that installs `ffmpeg` and `libsndfile1`, then serves via
+`gunicorn` on the port defined by the `FLASK_PORT` env var (default `8000`). In
+`voicewaves-backend`'s `docker-compose.yml`, this image is built as the
+`mfcc_extractor` service and consumed exclusively over HTTP — no other service
+imports this repository's Python code directly.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE) for the full text.
