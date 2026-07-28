@@ -87,11 +87,9 @@ def extract_health_matrix(
     elif full.shape[1] > 144:
         full = full[:, :144]
 
-    # Ajusta número de frames
-    if full.shape[0] < target_frames:
-        pad = np.zeros((target_frames - full.shape[0], full.shape[1]), dtype=np.float32)
-        full = np.vstack([full, pad])
-    elif full.shape[0] > target_frames:
+    # Trunca ANTES de normalizar, para o cálculo de min/max por linha refletir
+    # exatamente a janela de frames que será persistida.
+    if full.shape[0] > target_frames:
         full = full[:target_frames, :]
 
     # `full` já passou por np.nan_to_num acima, então não há NaN/Inf remanescente
@@ -104,5 +102,12 @@ def extract_health_matrix(
     norm = (full - row_min) / safe_range
     normalized = np.round(norm * 255).astype(np.uint8)
     normalized[(row_range == 0).squeeze(axis=1)] = 0
+
+    # Completa com os próprios frames reais repetidos ciclicamente (em vez de
+    # zero-padding), feito depois de normalizar (equivalente, já que a
+    # normalização é por linha e cada linha duplicada repete o mesmo valor).
+    if normalized.shape[0] < target_frames:
+        repeat_times = int(np.ceil(target_frames / normalized.shape[0]))
+        normalized = np.tile(normalized, (repeat_times, 1))[:target_frames, :]
 
     return normalized, sr, (fmin, fmax)
