@@ -13,7 +13,7 @@ def extract_health_matrix(
     use_pcen: bool = False,
     force_down_to_16k: bool = True,
     fmin: int = 100,
-    fmax: int = 7200,
+    fmax: int = 900,
 ) -> np.ndarray:
     """
     Extrai uma matriz (target_frames, 144) sensível a variações de saúde vocal.

@@ -78,7 +78,7 @@ def run_extractor(path: str, mode: str, pcen: bool, down16k: bool) -> Tuple[list
         try:
             n_frames = int(request.args.get("n_frames", 20000))
             fmin = int(request.args.get("fmin", 100))
-            fmax = int(request.args.get("fmax", 7000))
+            fmax = int(request.args.get("fmax", 900))
         except Exception:
             raise ValueError("n_frames, fmin ou fmax inválidos")
 
@@ -89,7 +89,7 @@ def run_extractor(path: str, mode: str, pcen: bool, down16k: bool) -> Tuple[list
         try:
             n_frames = int(request.args.get("n_frames", 400))
             fmin = int(request.args.get("fmin", 100))
-            fmax = int(request.args.get("fmax", 7200))
+            fmax = int(request.args.get("fmax", 900))
         except Exception:
             raise ValueError("n_frames, fmin ou fmax inválidos")
 

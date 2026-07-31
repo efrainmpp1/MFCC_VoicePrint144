@@ -11,7 +11,7 @@ def extract_mfcc_matrix(
     pre_emphasis: float = 0.97,
     force_down_to_16k: bool = True,
     fmin: int = 100,
-    fmax: int = 7000
+    fmax: int = 900
 ) -> np.ndarray:
     """
     Retorna uma matriz (target_frames, 144), com valores normalizados por
