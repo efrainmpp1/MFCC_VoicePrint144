@@ -59,14 +59,25 @@ def save_uploaded_wav(file: FileStorage, upload_dir: str) -> str:
 def convert_to_wav_if_needed(path: str) -> str:
     """Se o arquivo não for .wav (ex: m4a/mp4/aac de gravação mobile), converte via
     ffmpeg; retorna o caminho a ser usado pelo extrator. O arquivo já está em disco
-    (salvo por save_uploaded_wav), então é seekable e o ffmpeg lida com ele direto."""
+    (salvo por save_uploaded_wav), então é seekable e o ffmpeg lida com ele direto.
+
+    EXPERIMENTAL (branch experiment/soxr-dither-m4a-conversion): força resample pra
+    16kHz já no ffmpeg via soxr + dithering triangular, em vez de deixar o downsample
+    pro resampy (kaiser_best) que os extratores já fazem por padrão em `main`. Isso
+    diverge do pipeline que gerou os templates biométricos já enrolados — não fazer
+    merge pra main sem validar o impacto no matcher de verdade."""
     if path.lower().endswith(".wav"):
         return path
 
     wav_path = f"{os.path.splitext(path)[0]}.wav"
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-i", path, "-vn", "-acodec", "pcm_s16le", wav_path],
+            [
+                "ffmpeg", "-y", "-i", path,
+                "-c:a", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                "-af", "aresample=resampler=soxr:osr=16000:dither_method=triangular",
+                wav_path,
+            ],
             check=True, capture_output=True, timeout=60,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
