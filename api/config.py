@@ -24,5 +24,5 @@ class Config:
     # Downsample para 16kHz se sr > 16k
     DEFAULT_DOWN16K = os.getenv("DEFAULT_DOWN16K", "1")  # "0" ou "1"
 
-    # Extensões permitidas
-    ALLOWED_EXTENSIONS = {"wav"}
+    # Extensões permitidas (wav nativo; m4a/mp4/aac são convertidos via ffmpeg)
+    ALLOWED_EXTENSIONS = {"wav", "m4a", "mp4", "aac"}

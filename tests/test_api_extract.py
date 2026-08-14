@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import numpy as np
 import soundfile as sf
 import pytest
@@ -92,6 +93,32 @@ def test_wrong_extension(client, tmp_path):
     assert resp.status_code in (400, 415)
     payload = resp.get_json()
     assert "only .wav" in payload.get("error", "").lower()
+
+
+def test_extract_from_m4a_ok(client, tmp_path):
+    """.m4a (formato padrão de gravação mobile) deve ser aceito e convertido
+    internamente via ffmpeg antes da extração."""
+    wav_path = _make_test_wav(tmp_path, sr=16000, secs=0.7, freq=440.0)
+    m4a_path = tmp_path / "sample.m4a"
+
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(wav_path), str(m4a_path)],
+        check=True, capture_output=True,
+    )
+
+    with open(m4a_path, "rb") as f:
+        data = {"file": (f, "sample.m4a")}
+        resp = client.post(
+            "/api/v1/extract?mode=mfcc",
+            data=data,
+            content_type="multipart/form-data",
+        )
+
+    assert resp.status_code == 200, resp.data
+    payload = resp.get_json()
+    assert payload["shape"] == [144]
+    assert isinstance(payload["features"], list)
+    assert len(payload["features"]) == 144
 
 
 @pytest.mark.parametrize("sr", [22050, 32000, 48000])

@@ -1,4 +1,5 @@
 import os
+import subprocess
 import time
 import uuid
 from typing import Tuple, Dict, Any
@@ -45,7 +46,7 @@ def save_uploaded_wav(file: FileStorage, upload_dir: str) -> str:
     if file.filename == "":
         raise ValueError("empty filename")
     if not allowed_file(file.filename):
-        raise ValueError("unsupported file type, only .wav allowed")
+        raise ValueError("unsupported file type, only .wav/.m4a/.mp4/.aac allowed")
 
     os.makedirs(upload_dir, exist_ok=True)
     base = secure_filename(file.filename)
@@ -54,6 +55,23 @@ def save_uploaded_wav(file: FileStorage, upload_dir: str) -> str:
     path = os.path.join(upload_dir, unique)
     file.save(path)
     return path
+
+def convert_to_wav_if_needed(path: str) -> str:
+    """Se o arquivo não for .wav (ex: m4a/mp4/aac de gravação mobile), converte via
+    ffmpeg; retorna o caminho a ser usado pelo extrator. O arquivo já está em disco
+    (salvo por save_uploaded_wav), então é seekable e o ffmpeg lida com ele direto."""
+    if path.lower().endswith(".wav"):
+        return path
+
+    wav_path = f"{os.path.splitext(path)[0]}.wav"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", path, "-vn", "-acodec", "pcm_s16le", wav_path],
+            check=True, capture_output=True, timeout=60,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        raise ValueError(f"failed to convert audio to wav: {e}")
+    return wav_path
 
 def run_extractor(path: str, mode: str, pcen: bool, down16k: bool) -> Tuple[list, int, Tuple[int, int], str, bool]:
     """
@@ -138,7 +156,7 @@ def create_app() -> Flask:
     def extract():
         """
         POST /api/v1/extract?mode=mfcc|logmel|bio_mean144|bio_mm72&pcen=0|1&down16k=0|1
-        form-data: file=@file.wav
+        form-data: file=@file.wav (também aceita .m4a/.mp4/.aac, convertidos via ffmpeg)
         """
         t0 = time.time()
 
@@ -158,20 +176,31 @@ def create_app() -> Flask:
         except Exception as e:
             return jsonify({"error": f"failed to save file: {e}"}), 500
 
+        # 3b) converte pra wav se necessário (m4a/mp4/aac de gravação mobile)
+        try:
+            extract_path = convert_to_wav_if_needed(save_path)
+        except ValueError as ve:
+            try:
+                os.remove(save_path)
+            except Exception:
+                pass
+            return jsonify({"error": str(ve)}), 400
+
         # 4) extrair + montar payload
         try:
-            vec, sr, band, mode_final, pcen_final = run_extractor(save_path, mode, pcen, down16k)
+            vec, sr, band, mode_final, pcen_final = run_extractor(extract_path, mode, pcen, down16k)
             latency = int((time.time() - t0) * 1000)
             print(f"[mfcc_extractor] mode={mode_final} processamento levou {latency}ms")
             return jsonify(build_payload(vec, sr, band, mode_final, pcen_final, down16k, latency)), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500
         finally:
-            # 5) limpar arquivo
-            try:
-                os.remove(save_path)
-            except Exception:
-                pass
+            # 5) limpar arquivo(s)
+            for p in {save_path, extract_path}:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
     @app.errorhandler(413)
     def too_large(_):
