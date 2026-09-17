@@ -9,7 +9,7 @@ def main():
     ap.add_argument("--mode", choices=["mfcc", "logmel", "health_matrix"], default="mfcc")
     ap.add_argument("--pcen", action="store_true", help="Use PCEN (logmel or health_matrix)")
     ap.add_argument("--no-down16k", action="store_true", help="Do not force downsample to 16 kHz when sr>16k")
-    ap.add_argument("--n-frames", type=int, default=400, help="Target frames for health_matrix (default: 400)")
+    ap.add_argument("--n-frames", type=int, default=20000, help="Target frames for health_matrix (default: 20000)")
     ap.add_argument("--fmin", type=int, default=100, help="Min frequency (health_matrix)")
     ap.add_argument("--fmax", type=int, default=900, help="Max frequency (health_matrix)")
     ap.add_argument("--out", default="", help="Save JSON to file instead of printing")

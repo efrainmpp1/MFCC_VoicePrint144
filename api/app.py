@@ -105,7 +105,7 @@ def run_extractor(path: str, mode: str, pcen: bool, down16k: bool) -> Tuple[list
 
     if mode == "health_matrix":
         try:
-            n_frames = int(request.args.get("n_frames", 400))
+            n_frames = int(request.args.get("n_frames", 20000))
             fmin = int(request.args.get("fmin", 100))
             fmax = int(request.args.get("fmax", 900))
         except Exception:

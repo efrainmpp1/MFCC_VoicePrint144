@@ -67,7 +67,7 @@ pipeline, and the ones this document tracks most closely as they evolve.
 | Real columns before tiling | 71 | 98 |
 | Composition | 23 MFCC (**c0 dropped**) + 24 Δ (incl. Δ of c0) + 24 ΔΔ (incl. ΔΔ of c0) | 48 Mel/PCEN bands + 48 Δ + 1 RMS energy + 1 pitch (Hz, via YIN) |
 | Tiled/cropped to | 144 columns | 144 columns |
-| Default `target_frames` | 20000 | 400 |
+| Default `target_frames` | 20000 | 20000 |
 | Default `fmin` / `fmax` | 100 / 7000 Hz | 100 / 7200 Hz |
 
 `c0` — the raw MFCC log-energy coefficient — is deliberately excluded from
@@ -178,8 +178,8 @@ matrix, sr, band = extract_mfcc_matrix("path/to/audio.wav", target_frames=20000)
 print(matrix.shape, matrix.dtype)  # (20000, 144) uint8
 
 # Per-frame vocal-health matrix
-matrix, sr, band = extract_health_matrix("path/to/audio.wav", target_frames=400)
-print(matrix.shape, matrix.dtype)  # (400, 144) uint8
+matrix, sr, band = extract_health_matrix("path/to/audio.wav", target_frames=20000)
+print(matrix.shape, matrix.dtype)  # (20000, 144) uint8
 ```
 
 ### CLI
@@ -187,7 +187,7 @@ print(matrix.shape, matrix.dtype)  # (400, 144) uint8
 ```bash
 python -m voiceprint_features_144.cli path/to/audio.wav --mode mfcc
 python -m voiceprint_features_144.cli path/to/audio.wav --mode logmel --pcen
-python -m voiceprint_features_144.cli path/to/audio.wav --mode health_matrix --n-frames 400 --pcen
+python -m voiceprint_features_144.cli path/to/audio.wav --mode health_matrix --n-frames 20000 --pcen
 ```
 
 The console script `vw-extract` (installed via `pip install -e .`) is an equivalent
@@ -229,7 +229,7 @@ Query params by mode:
 | `logmel` | `pcen=0\|1`, `down16k=0\|1` |
 | `bio_mean144`, `bio_mm72` | `pcen=0\|1`, `down16k=0\|1` |
 | `mfcc_matrix` | `n_frames` (default `20000`), `fmin` (`100`), `fmax` (`7000`) |
-| `health_matrix` | `n_frames` (default `400`), `fmin` (`100`), `fmax` (`7200`), `pcen=0\|1`, `down16k=0\|1` |
+| `health_matrix` | `n_frames` (default `20000`), `fmin` (`100`), `fmax` (`7200`), `pcen=0\|1`, `down16k=0\|1` |
 
 Example requests:
 
@@ -240,7 +240,7 @@ curl -X POST "http://localhost:8000/api/v1/extract?mode=logmel&pcen=1" \
 curl -X POST "http://localhost:8000/api/v1/extract?mode=mfcc_matrix&n_frames=20000&fmin=100&fmax=7000" \
   -F "file=@path/to/audio.wav"
 
-curl -X POST "http://localhost:8000/api/v1/extract?mode=health_matrix&n_frames=400&pcen=1" \
+curl -X POST "http://localhost:8000/api/v1/extract?mode=health_matrix&n_frames=20000&pcen=1" \
   -F "file=@path/to/audio.wav"
 ```
 

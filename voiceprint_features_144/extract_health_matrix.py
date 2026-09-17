@@ -8,7 +8,7 @@ from .common_adaptive import to_mono, stft_params_from_sr, safe_voice_band
 def extract_health_matrix(
     wav_path: str,
     n_mels: int = 48,
-    target_frames: int = 400,
+    target_frames: int = 20000,
     pre_emphasis: float = 0.97,
     use_pcen: bool = False,
     force_down_to_16k: bool = True,
